@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,18 +6,128 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FileText, Download, Calendar, BarChart3 } from 'lucide-react';
-import { sampleStockReceipts, sampleStockConsumptions, calculateCurrentStock } from '../data/sampleData';
+import { StockReceipt, StockConsumption, InventoryItem } from '../types/inventory';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function Reports() {
   const [reportType, setReportType] = useState('receipt');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [receipts, setReceipts] = useState<StockReceipt[]>([]);
+  const [consumptions, setConsumptions] = useState<StockConsumption[]>([]);
+  const [currentStock, setCurrentStock] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const currentStock = calculateCurrentStock();
+  useEffect(() => {
+    fetchAllData();
+  }, []);
+
+  const fetchAllData = async () => {
+    setLoading(true);
+    try {
+      await Promise.all([
+        fetchReceipts(),
+        fetchConsumptions(),
+        fetchCurrentStock()
+      ]);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchReceipts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('stock_receipts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      const formattedReceipts = data?.map(receipt => ({
+        id: receipt.id,
+        itemName: receipt.item_name,
+        itemCode: receipt.item_code,
+        quantityReceived: receipt.quantity_received,
+        ratePerUnit: receipt.rate_per_unit,
+        unitOfMeasurement: receipt.unit_of_measurement,
+        totalValue: receipt.total_value,
+        supplierName: receipt.supplier_name,
+        deliveryDate: receipt.delivery_date,
+        receivedBy: receipt.received_by,
+        createdAt: receipt.created_at,
+        createdBy: 'System User'
+      })) || [];
+      
+      setReceipts(formattedReceipts);
+    } catch (error: any) {
+      console.error('Error fetching receipts:', error);
+      setReceipts([]);
+    }
+  };
+
+  const fetchConsumptions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('stock_consumptions')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      const formattedConsumptions = data?.map(consumption => ({
+        id: consumption.id,
+        itemName: consumption.item_name,
+        itemCode: consumption.item_code,
+        quantityUsed: consumption.quantity_used,
+        purpose: consumption.purpose,
+        activityCode: consumption.activity_code,
+        usedBy: consumption.used_by,
+        date: consumption.date,
+        remarks: consumption.remarks,
+        ratePerUnit: consumption.rate_per_unit,
+        totalValue: consumption.total_value,
+        createdAt: consumption.created_at,
+        createdBy: 'System User'
+      })) || [];
+      
+      setConsumptions(formattedConsumptions);
+    } catch (error: any) {
+      console.error('Error fetching consumptions:', error);
+      setConsumptions([]);
+    }
+  };
+
+  const fetchCurrentStock = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('current_inventory')
+        .select('*');
+
+      if (error) throw error;
+      
+      const formattedStock = data?.map(item => ({
+        itemCode: item.item_code,
+        itemName: item.item_name,
+        currentStock: item.current_stock,
+        unitOfMeasurement: item.unit_of_measurement,
+        lastRatePerUnit: item.last_rate_per_unit,
+        totalValue: item.total_value,
+        lastUpdated: item.last_updated,
+      })) || [];
+      
+      setCurrentStock(formattedStock);
+    } catch (error: any) {
+      console.error('Error fetching current stock:', error);
+      setCurrentStock([]);
+    }
+  };
 
   const getFilteredReceipts = () => {
-    let filtered = [...sampleStockReceipts];
+    let filtered = [...receipts];
     if (dateFrom) {
       filtered = filtered.filter(r => r.deliveryDate >= dateFrom);
     }
@@ -28,7 +138,7 @@ export default function Reports() {
   };
 
   const getFilteredConsumptions = () => {
-    let filtered = [...sampleStockConsumptions];
+    let filtered = [...consumptions];
     if (dateFrom) {
       filtered = filtered.filter(c => c.date >= dateFrom);
     }
@@ -43,7 +153,8 @@ export default function Reports() {
       headers.join(','),
       ...data.map(row => 
         headers.map(header => {
-          const value = row[header.toLowerCase().replace(/\s+/g, '')];
+          const key = header.toLowerCase().replace(/\s+/g, '').replace('/', '');
+          let value = row[key] || row[header.toLowerCase().replace(/\s+/g, '')];
           return typeof value === 'string' ? `"${value}"` : value;
         }).join(',')
       )
@@ -193,6 +304,7 @@ export default function Reports() {
                   else exportValuationReport();
                 }}
                 className="w-full bg-gradient-primary hover:opacity-90"
+                disabled={loading}
               >
                 <Download className="w-4 h-4 mr-2" />
                 Export CSV

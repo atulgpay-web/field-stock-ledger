@@ -14,10 +14,146 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          role: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          role?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          role?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      stock_consumptions: {
+        Row: {
+          activity_code: string
+          created_at: string
+          date: string
+          id: string
+          item_code: string
+          item_name: string
+          purpose: string
+          quantity_used: number
+          rate_per_unit: number
+          remarks: string | null
+          total_value: number
+          updated_at: string
+          used_by: string
+          user_id: string
+        }
+        Insert: {
+          activity_code: string
+          created_at?: string
+          date: string
+          id?: string
+          item_code: string
+          item_name: string
+          purpose: string
+          quantity_used: number
+          rate_per_unit: number
+          remarks?: string | null
+          total_value: number
+          updated_at?: string
+          used_by: string
+          user_id: string
+        }
+        Update: {
+          activity_code?: string
+          created_at?: string
+          date?: string
+          id?: string
+          item_code?: string
+          item_name?: string
+          purpose?: string
+          quantity_used?: number
+          rate_per_unit?: number
+          remarks?: string | null
+          total_value?: number
+          updated_at?: string
+          used_by?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      stock_receipts: {
+        Row: {
+          created_at: string
+          delivery_date: string
+          id: string
+          item_code: string
+          item_name: string
+          quantity_received: number
+          rate_per_unit: number
+          received_by: string
+          supplier_name: string
+          total_value: number
+          unit_of_measurement: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          delivery_date: string
+          id?: string
+          item_code: string
+          item_name: string
+          quantity_received: number
+          rate_per_unit: number
+          received_by: string
+          supplier_name: string
+          total_value: number
+          unit_of_measurement: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          delivery_date?: string
+          id?: string
+          item_code?: string
+          item_name?: string
+          quantity_received?: number
+          rate_per_unit?: number
+          received_by?: string
+          supplier_name?: string
+          total_value?: number
+          unit_of_measurement?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
-      [_ in never]: never
+      current_inventory: {
+        Row: {
+          current_stock: number | null
+          item_code: string | null
+          item_name: string | null
+          last_rate_per_unit: number | null
+          last_updated: string | null
+          total_value: number | null
+          unit_of_measurement: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never

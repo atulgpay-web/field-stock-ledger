@@ -1,11 +1,47 @@
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { List, AlertTriangle, Package, DollarSign } from 'lucide-react';
-import { calculateCurrentStock } from '../data/sampleData';
+import { InventoryItem } from '../types/inventory';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function CurrentInventory() {
-  const currentStock = calculateCurrentStock();
+  const [currentStock, setCurrentStock] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchCurrentStock();
+  }, []);
+
+  const fetchCurrentStock = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('current_inventory')
+        .select('*');
+
+      if (error) throw error;
+      
+      const formattedStock = data?.map(item => ({
+        itemCode: item.item_code,
+        itemName: item.item_name,
+        currentStock: item.current_stock,
+        unitOfMeasurement: item.unit_of_measurement,
+        lastRatePerUnit: item.last_rate_per_unit,
+        totalValue: item.total_value,
+        lastUpdated: item.last_updated,
+      })) || [];
+      
+      setCurrentStock(formattedStock);
+    } catch (error: any) {
+      console.error('Error fetching current stock:', error);
+      // Fallback to empty data if database is not accessible
+      setCurrentStock([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const totalValue = currentStock.reduce((sum, item) => sum + item.totalValue, 0);
   const lowStockItems = currentStock.filter(item => item.currentStock < 10);
   const outOfStockItems = currentStock.filter(item => item.currentStock <= 0);
@@ -15,6 +51,29 @@ export default function CurrentInventory() {
     if (stock < 10) return { label: 'Low Stock', variant: 'warning' as const };
     return { label: 'In Stock', variant: 'success' as const };
   };
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center space-x-3">
+          <List className="w-6 h-6 text-primary" />
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">Current Inventory</h2>
+            <p className="text-muted-foreground">Loading inventory data...</p>
+          </div>
+        </div>
+        <Card className="shadow-card">
+          <CardContent className="p-6">
+            <div className="animate-pulse space-y-4">
+              <div className="h-4 bg-muted rounded w-3/4"></div>
+              <div className="h-4 bg-muted rounded w-1/2"></div>
+              <div className="h-4 bg-muted rounded w-5/6"></div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -36,7 +95,9 @@ export default function CurrentInventory() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-foreground">{currentStock.length}</div>
-            <p className="text-xs text-muted-foreground">Unique items in inventory</p>
+            <p className="text-xs text-muted-foreground">
+              {currentStock.length === 0 ? 'No inventory data - add some stock receipts first' : 'Unique items in inventory'}
+            </p>
           </CardContent>
         </Card>
 
@@ -71,52 +132,65 @@ export default function CurrentInventory() {
           <CardTitle>Inventory Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Item Code</TableHead>
-                  <TableHead>Item Name</TableHead>
-                  <TableHead>Current Stock</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Rate per Unit</TableHead>
-                  <TableHead>Total Value</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last Updated</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {currentStock.map((item) => {
-                  const status = getStockStatus(item.currentStock);
-                  return (
-                    <TableRow key={item.itemCode}>
-                      <TableCell className="font-medium">
-                        <Badge variant="outline">{item.itemCode}</Badge>
-                      </TableCell>
-                      <TableCell>{item.itemName}</TableCell>
-                      <TableCell className={`font-medium ${
-                        item.currentStock <= 0 ? 'text-destructive' :
-                        item.currentStock < 10 ? 'text-warning' : 'text-foreground'
-                      }`}>
-                        {item.currentStock}
-                      </TableCell>
-                      <TableCell>{item.unitOfMeasurement}</TableCell>
-                      <TableCell>${item.lastRatePerUnit.toFixed(2)}</TableCell>
-                      <TableCell className="font-medium">
-                        ${item.totalValue.toLocaleString()}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={status.variant}>{status.label}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {new Date(item.lastUpdated).toLocaleDateString()}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+          {currentStock.length === 0 ? (
+            <div className="text-center py-8">
+              <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-foreground mb-2">No Inventory Data</h3>
+              <p className="text-muted-foreground mb-4">
+                Start by adding some stock receipts to see your inventory here.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Note: Authentication is required to save data to the database.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead>Item Name</TableHead>
+                    <TableHead>Current Stock</TableHead>
+                    <TableHead>Unit</TableHead>
+                    <TableHead>Rate per Unit</TableHead>
+                    <TableHead>Total Value</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Last Updated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {currentStock.map((item) => {
+                    const status = getStockStatus(item.currentStock);
+                    return (
+                      <TableRow key={item.itemCode}>
+                        <TableCell className="font-medium">
+                          <Badge variant="outline">{item.itemCode}</Badge>
+                        </TableCell>
+                        <TableCell>{item.itemName}</TableCell>
+                        <TableCell className={`font-medium ${
+                          item.currentStock <= 0 ? 'text-destructive' :
+                          item.currentStock < 10 ? 'text-warning' : 'text-foreground'
+                        }`}>
+                          {item.currentStock}
+                        </TableCell>
+                        <TableCell>{item.unitOfMeasurement}</TableCell>
+                        <TableCell>${item.lastRatePerUnit.toFixed(2)}</TableCell>
+                        <TableCell className="font-medium">
+                          ${item.totalValue.toLocaleString()}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={status.variant}>{status.label}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          {new Date(item.lastUpdated).toLocaleDateString()}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 

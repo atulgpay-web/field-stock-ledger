@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,14 +8,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Minus, Activity, Edit, AlertCircle } from 'lucide-react';
-import { sampleStockConsumptions, sampleUsers, calculateCurrentStock } from '../data/sampleData';
-import { StockConsumption as StockConsumptionType } from '../types/inventory';
+import { sampleUsers } from '../data/sampleData';
+import { StockConsumption as StockConsumptionType, InventoryItem } from '../types/inventory';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function StockConsumption() {
   const [showForm, setShowForm] = useState(false);
-  const [consumptions, setConsumptions] = useState<StockConsumptionType[]>(sampleStockConsumptions);
+  const [consumptions, setConsumptions] = useState<StockConsumptionType[]>([]);
   const [editingConsumption, setEditingConsumption] = useState<StockConsumptionType | null>(null);
+  const [currentStock, setCurrentStock] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
   
   const [formData, setFormData] = useState({
     itemName: '',
@@ -28,7 +31,6 @@ export default function StockConsumption() {
     remarks: '',
   });
 
-  const currentStock = calculateCurrentStock();
   const activityCodes = ['ACT001', 'ACT002', 'ACT003', 'ACT004', 'ACT005', 'ACT006'];
   const purposes = [
     'Foundation Work', 
@@ -38,6 +40,68 @@ export default function StockConsumption() {
     'Electrical Work', 
     'Plumbing Work'
   ];
+
+  useEffect(() => {
+    fetchConsumptions();
+    fetchCurrentStock();
+  }, []);
+
+  const fetchConsumptions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('stock_consumptions')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      const formattedConsumptions = data?.map(consumption => ({
+        id: consumption.id,
+        itemName: consumption.item_name,
+        itemCode: consumption.item_code,
+        quantityUsed: consumption.quantity_used,
+        purpose: consumption.purpose,
+        activityCode: consumption.activity_code,
+        usedBy: consumption.used_by,
+        date: consumption.date,
+        remarks: consumption.remarks,
+        ratePerUnit: consumption.rate_per_unit,
+        totalValue: consumption.total_value,
+        createdAt: consumption.created_at,
+        createdBy: 'System User',
+        updatedAt: consumption.updated_at,
+        updatedBy: consumption.updated_at ? 'System User' : undefined
+      })) || [];
+      
+      setConsumptions(formattedConsumptions);
+    } catch (error: any) {
+      console.error('Error fetching consumptions:', error);
+    }
+  };
+
+  const fetchCurrentStock = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('current_inventory')
+        .select('*');
+
+      if (error) throw error;
+      
+      const formattedStock = data?.map(item => ({
+        itemCode: item.item_code,
+        itemName: item.item_name,
+        currentStock: item.current_stock,
+        unitOfMeasurement: item.unit_of_measurement,
+        lastRatePerUnit: item.last_rate_per_unit,
+        totalValue: item.total_value,
+        lastUpdated: item.last_updated,
+      })) || [];
+      
+      setCurrentStock(formattedStock);
+    } catch (error: any) {
+      console.error('Error fetching current stock:', error);
+    }
+  };
 
   const resetForm = () => {
     setFormData({
@@ -58,8 +122,9 @@ export default function StockConsumption() {
     return item ? item.currentStock : 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     
     const availableStock = getAvailableStock(formData.itemCode);
     const quantityUsed = parseFloat(formData.quantityUsed);
@@ -70,6 +135,7 @@ export default function StockConsumption() {
         description: `Only ${availableStock} units available in stock.`,
         variant: "destructive"
       });
+      setLoading(false);
       return;
     }
     
@@ -77,38 +143,91 @@ export default function StockConsumption() {
     const ratePerUnit = stockItem?.lastRatePerUnit || 0;
     const totalValue = quantityUsed * ratePerUnit;
     const now = new Date().toISOString();
-    
-    if (editingConsumption) {
-      const updatedConsumption: StockConsumptionType = {
-        ...editingConsumption,
-        ...formData,
-        quantityUsed,
-        ratePerUnit,
-        totalValue,
-        updatedAt: now,
-        updatedBy: 'John Smith',
-      };
+
+    try {
+      if (editingConsumption) {
+        const { error } = await supabase
+          .from('stock_consumptions')
+          .update({
+            item_name: formData.itemName,
+            item_code: formData.itemCode,
+            quantity_used: quantityUsed,
+            purpose: formData.purpose,
+            activity_code: formData.activityCode,
+            used_by: formData.usedBy,
+            date: formData.date,
+            remarks: formData.remarks,
+            rate_per_unit: ratePerUnit,
+            total_value: totalValue,
+            user_id: '00000000-0000-0000-0000-000000000000'
+          })
+          .eq('id', editingConsumption.id);
+
+        if (error) throw error;
+        
+        toast({ title: "Consumption updated in database successfully" });
+        await fetchConsumptions();
+        await fetchCurrentStock();
+      } else {
+        const { error } = await supabase
+          .from('stock_consumptions')
+          .insert({
+            item_name: stockItem?.itemName || formData.itemName,
+            item_code: formData.itemCode,
+            quantity_used: quantityUsed,
+            purpose: formData.purpose,
+            activity_code: formData.activityCode,
+            used_by: formData.usedBy,
+            date: formData.date,
+            remarks: formData.remarks,
+            rate_per_unit: ratePerUnit,
+            total_value: totalValue,
+            user_id: '00000000-0000-0000-0000-000000000000'
+          });
+
+        if (error) throw error;
+        
+        toast({ title: "Consumption saved to database successfully" });
+        await fetchConsumptions();
+        await fetchCurrentStock();
+      }
+    } catch (error: any) {
+      console.error('Database error:', error);
       
-      setConsumptions(consumptions.map(c => c.id === editingConsumption.id ? updatedConsumption : c));
-      toast({ title: "Consumption updated successfully" });
-    } else {
-      const newConsumption: StockConsumptionType = {
-        id: `SC${String(consumptions.length + 1).padStart(3, '0')}`,
-        itemName: stockItem?.itemName || formData.itemName,
-        ...formData,
-        quantityUsed,
-        ratePerUnit,
-        totalValue,
-        createdAt: now,
-        createdBy: 'John Smith',
-      };
-      
-      setConsumptions([newConsumption, ...consumptions]);
-      toast({ title: "Consumption recorded successfully" });
+      // Fallback to local state
+      if (editingConsumption) {
+        const updatedConsumption: StockConsumptionType = {
+          ...editingConsumption,
+          ...formData,
+          quantityUsed,
+          ratePerUnit,
+          totalValue,
+          updatedAt: now,
+          updatedBy: 'Demo User',
+        };
+        
+        setConsumptions(consumptions.map(c => c.id === editingConsumption.id ? updatedConsumption : c));
+        toast({ title: "Consumption updated (local only - add authentication to save to database)" });
+      } else {
+        const newConsumption: StockConsumptionType = {
+          id: `SC${String(consumptions.length + 1).padStart(3, '0')}`,
+          itemName: stockItem?.itemName || formData.itemName,
+          ...formData,
+          quantityUsed,
+          ratePerUnit,
+          totalValue,
+          createdAt: now,
+          createdBy: 'Demo User',
+        };
+        
+        setConsumptions([newConsumption, ...consumptions]);
+        toast({ title: "Consumption recorded (local only - add authentication to save to database)" });
+      }
+    } finally {
+      setLoading(false);
+      resetForm();
+      setShowForm(false);
     }
-    
-    resetForm();
-    setShowForm(false);
   };
 
   const handleEdit = (consumption: StockConsumptionType) => {
@@ -304,10 +423,10 @@ export default function StockConsumption() {
               <div className="md:col-span-2 lg:col-span-3 flex gap-2">
                 <Button 
                   type="submit" 
+                  disabled={loading || (isInsufficientStock && !editingConsumption)}
                   className="bg-gradient-primary hover:opacity-90"
-                  disabled={isInsufficientStock && !editingConsumption}
                 >
-                  {editingConsumption ? 'Update Consumption' : 'Record Consumption'}
+                  {loading ? 'Saving...' : editingConsumption ? 'Update Consumption' : 'Record Consumption'}
                 </Button>
                 <Button type="button" variant="outline" onClick={() => {
                   resetForm();

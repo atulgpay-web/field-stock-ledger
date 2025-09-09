@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,15 +6,17 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Package, Edit, Eye } from 'lucide-react';
-import { sampleStockReceipts, sampleUsers } from '../data/sampleData';
+import { Plus, Package, Edit } from 'lucide-react';
+import { sampleUsers } from '../data/sampleData';
 import { StockReceipt as StockReceiptType } from '../types/inventory';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function StockReceipt() {
   const [showForm, setShowForm] = useState(false);
-  const [receipts, setReceipts] = useState<StockReceiptType[]>(sampleStockReceipts);
+  const [receipts, setReceipts] = useState<StockReceiptType[]>([]);
   const [editingReceipt, setEditingReceipt] = useState<StockReceiptType | null>(null);
+  const [loading, setLoading] = useState(false);
   
   const [formData, setFormData] = useState({
     itemName: '',
@@ -30,6 +32,47 @@ export default function StockReceipt() {
   const units = ['Pieces', 'Bags', 'Cubic Feet', 'Meters', 'Tons', 'Liters', 'Square Feet'];
   const itemCodes = ['CEM001', 'STL001', 'SND001', 'BRK001', 'GRV001', 'PLY001', 'WIR001'];
 
+  useEffect(() => {
+    fetchReceipts();
+  }, []);
+
+  const fetchReceipts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('stock_receipts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      const formattedReceipts = data?.map(receipt => ({
+        id: receipt.id,
+        itemName: receipt.item_name,
+        itemCode: receipt.item_code,
+        quantityReceived: receipt.quantity_received,
+        ratePerUnit: receipt.rate_per_unit,
+        unitOfMeasurement: receipt.unit_of_measurement,
+        totalValue: receipt.total_value,
+        supplierName: receipt.supplier_name,
+        deliveryDate: receipt.delivery_date,
+        receivedBy: receipt.received_by,
+        createdAt: receipt.created_at,
+        createdBy: 'System User',
+        updatedAt: receipt.updated_at,
+        updatedBy: receipt.updated_at ? 'System User' : undefined
+      })) || [];
+      
+      setReceipts(formattedReceipts);
+    } catch (error: any) {
+      console.error('Error fetching receipts:', error);
+      toast({
+        title: "Info",
+        description: "Add user authentication to save data to the database. Currently using local storage.",
+        variant: "default",
+      });
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       itemName: '',
@@ -44,42 +87,94 @@ export default function StockReceipt() {
     setEditingReceipt(null);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     
     const totalValue = parseFloat(formData.quantityReceived) * parseFloat(formData.ratePerUnit);
     const now = new Date().toISOString();
-    
-    if (editingReceipt) {
-      const updatedReceipt: StockReceiptType = {
-        ...editingReceipt,
-        ...formData,
-        quantityReceived: parseFloat(formData.quantityReceived),
-        ratePerUnit: parseFloat(formData.ratePerUnit),
-        totalValue,
-        updatedAt: now,
-        updatedBy: 'John Smith',
-      };
+
+    try {
+      if (editingReceipt) {
+        // Try database update first
+        const { error } = await supabase
+          .from('stock_receipts')
+          .update({
+            item_name: formData.itemName,
+            item_code: formData.itemCode,
+            quantity_received: parseFloat(formData.quantityReceived),
+            rate_per_unit: parseFloat(formData.ratePerUnit),
+            unit_of_measurement: formData.unitOfMeasurement,
+            total_value: totalValue,
+            supplier_name: formData.supplierName,
+            delivery_date: formData.deliveryDate,
+            received_by: formData.receivedBy,
+            user_id: '00000000-0000-0000-0000-000000000000' // Placeholder until auth is added
+          })
+          .eq('id', editingReceipt.id);
+
+        if (error) throw error;
+
+        toast({ title: "Receipt updated in database successfully" });
+        await fetchReceipts();
+      } else {
+        // Try database insert first
+        const { error } = await supabase
+          .from('stock_receipts')
+          .insert({
+            item_name: formData.itemName,
+            item_code: formData.itemCode,
+            quantity_received: parseFloat(formData.quantityReceived),
+            rate_per_unit: parseFloat(formData.ratePerUnit),
+            unit_of_measurement: formData.unitOfMeasurement,
+            total_value: totalValue,
+            supplier_name: formData.supplierName,
+            delivery_date: formData.deliveryDate,
+            received_by: formData.receivedBy,
+            user_id: '00000000-0000-0000-0000-000000000000' // Placeholder until auth is added
+          });
+
+        if (error) throw error;
+
+        toast({ title: "Receipt saved to database successfully" });
+        await fetchReceipts();
+      }
+    } catch (error: any) {
+      console.error('Database error:', error);
       
-      setReceipts(receipts.map(r => r.id === editingReceipt.id ? updatedReceipt : r));
-      toast({ title: "Receipt updated successfully" });
-    } else {
-      const newReceipt: StockReceiptType = {
-        id: `SR${String(receipts.length + 1).padStart(3, '0')}`,
-        ...formData,
-        quantityReceived: parseFloat(formData.quantityReceived),
-        ratePerUnit: parseFloat(formData.ratePerUnit),
-        totalValue,
-        createdAt: now,
-        createdBy: 'John Smith',
-      };
-      
-      setReceipts([newReceipt, ...receipts]);
-      toast({ title: "Receipt created successfully" });
+      // Fallback to local state for demo purposes
+      if (editingReceipt) {
+        const updatedReceipt: StockReceiptType = {
+          ...editingReceipt,
+          ...formData,
+          quantityReceived: parseFloat(formData.quantityReceived),
+          ratePerUnit: parseFloat(formData.ratePerUnit),
+          totalValue,
+          updatedAt: now,
+          updatedBy: 'Demo User',
+        };
+        
+        setReceipts(receipts.map(r => r.id === editingReceipt.id ? updatedReceipt : r));
+        toast({ title: "Receipt updated (local only - add authentication to save to database)" });
+      } else {
+        const newReceipt: StockReceiptType = {
+          id: `SR${String(receipts.length + 1).padStart(3, '0')}`,
+          ...formData,
+          quantityReceived: parseFloat(formData.quantityReceived),
+          ratePerUnit: parseFloat(formData.ratePerUnit),
+          totalValue,
+          createdAt: now,
+          createdBy: 'Demo User',
+        };
+        
+        setReceipts([newReceipt, ...receipts]);
+        toast({ title: "Receipt saved (local only - add authentication to save to database)" });
+      }
+    } finally {
+      setLoading(false);
+      resetForm();
+      setShowForm(false);
     }
-    
-    resetForm();
-    setShowForm(false);
   };
 
   const handleEdit = (receipt: StockReceiptType) => {
@@ -245,8 +340,12 @@ export default function StockReceipt() {
               </div>
 
               <div className="md:col-span-2 lg:col-span-3 flex gap-2">
-                <Button type="submit" className="bg-gradient-primary hover:opacity-90">
-                  {editingReceipt ? 'Update Receipt' : 'Create Receipt'}
+                <Button 
+                  type="submit" 
+                  disabled={loading}
+                  className="bg-gradient-primary hover:opacity-90"
+                >
+                  {loading ? 'Saving...' : editingReceipt ? 'Update Receipt' : 'Create Receipt'}
                 </Button>
                 <Button type="button" variant="outline" onClick={() => {
                   resetForm();
